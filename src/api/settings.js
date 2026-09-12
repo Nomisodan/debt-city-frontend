@@ -1,3 +1,5 @@
+import { readJson } from './http'
+
 const BASE = import.meta.env.VITE_API_URL ?? ''
 
 export async function downloadBackup() {
@@ -21,7 +23,5 @@ export async function restoreBackup(backup) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ confirm: true, backup }),
   })
-  const json = await res.json()
-  if (!res.ok) throw new Error(json.error ?? 'Restore failed')
-  return json
+  return readJson(res, 'Restore failed')
 }

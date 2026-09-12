@@ -1,9 +1,10 @@
+import { readJson } from './http'
+
 const BASE = import.meta.env.VITE_API_URL ?? ''
 
 export async function fetchAccounts() {
   const res = await fetch(`${BASE}/api/accounts`)
-  if (!res.ok) throw new Error('Failed to fetch accounts')
-  return res.json()
+  return readJson(res, 'Failed to fetch accounts')
 }
 
 export async function createAccount(data) {
@@ -12,9 +13,7 @@ export async function createAccount(data) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   })
-  const json = await res.json()
-  if (!res.ok) throw new Error(json.error ?? 'Create failed')
-  return json
+  return readJson(res, 'Create failed')
 }
 
 export async function updateAccount(id, patch) {
@@ -23,14 +22,10 @@ export async function updateAccount(id, patch) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(patch),
   })
-  const data = await res.json()
-  if (!res.ok) throw new Error(data.error ?? 'Update failed')
-  return data
+  return readJson(res, 'Update failed')
 }
 
 export async function deleteAccount(id) {
   const res = await fetch(`${BASE}/api/accounts/${id}`, { method: 'DELETE' })
-  const data = await res.json()
-  if (!res.ok) throw new Error(data.error ?? 'Delete failed')
-  return data
+  return readJson(res, 'Delete failed')
 }
