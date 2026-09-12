@@ -345,15 +345,25 @@ function AccountCard({ account, onSaved, onDeleted }) {
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="text-xs text-[var(--color-muted)] mb-1 block">Opening balance ($)</label>
-              <input
-                type="number" step="0.01"
-                value={draft}
-                onChange={e => setDraft(e.target.value)}
-                onKeyDown={onKeyDown}
-                autoFocus
-                className="w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm font-mono text-[var(--color-text)] focus:outline-none focus:border-[var(--color-today)]"
-                placeholder="-598.81"
-              />
+              <div className="flex gap-1">
+                <button
+                  type="button"
+                  onClick={() => setDraft(d => d.startsWith('-') ? d.slice(1) : `-${d}`)}
+                  title="Toggle negative"
+                  className="px-2.5 rounded-lg bg-[var(--color-surface-2)] border border-[var(--color-border)] text-sm font-mono text-[var(--color-text)] hover:border-[var(--color-today)]"
+                >
+                  ±
+                </button>
+                <input
+                  type="text" inputMode="decimal"
+                  value={draft}
+                  onChange={e => setDraft(e.target.value)}
+                  onKeyDown={onKeyDown}
+                  autoFocus
+                  className="w-full min-w-0 bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm font-mono text-[var(--color-text)] focus:outline-none focus:border-[var(--color-today)]"
+                  placeholder="-598.81"
+                />
+              </div>
             </div>
             <div>
               <label className="text-xs text-[var(--color-muted)] mb-1 block">As of date</label>
@@ -511,13 +521,23 @@ function AddAccountForm({ onCreated, onCancel }) {
       <div className="grid grid-cols-2 gap-2">
         <div>
           <label className="text-xs text-[var(--color-muted)] uppercase tracking-wider mb-1.5 block">Opening balance ($)</label>
-          <input
-            type="number" step="0.01"
-            value={form.balance}
-            onChange={e => set('balance', e.target.value)}
-            placeholder="0.00"
-            className="w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg px-3 py-2.5 text-sm font-mono text-[var(--color-text)] focus:outline-none focus:border-[var(--color-today)]"
-          />
+          <div className="flex gap-1">
+            <button
+              type="button"
+              onClick={() => set('balance', form.balance.startsWith('-') ? form.balance.slice(1) : `-${form.balance}`)}
+              title="Toggle negative"
+              className="px-2.5 rounded-lg bg-[var(--color-surface-2)] border border-[var(--color-border)] text-sm font-mono text-[var(--color-text)] hover:border-[var(--color-today)]"
+            >
+              ±
+            </button>
+            <input
+              type="text" inputMode="decimal"
+              value={form.balance}
+              onChange={e => set('balance', e.target.value)}
+              placeholder="0.00"
+              className="w-full min-w-0 bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg px-3 py-2.5 text-sm font-mono text-[var(--color-text)] focus:outline-none focus:border-[var(--color-today)]"
+            />
+          </div>
         </div>
         <div>
           <label className="text-xs text-[var(--color-muted)] uppercase tracking-wider mb-1.5 block">As of date</label>
