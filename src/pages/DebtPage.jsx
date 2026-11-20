@@ -295,6 +295,37 @@ function PaymentDrawer({ account, onClose, onReset }) {
     }
   }
 
+  // Month header circle: select every charge in that month, or clear them if all are already on.
+  function toggleMonth(items) {
+    const ids = items.map(i => i.id)
+    if (ids.every(id => selectedIds.includes(id))) {
+      setSelectedIds(prev => prev.filter(id => !ids.includes(id)))
+      return
+    }
+    const toAdd = items.filter(i => !selectedIds.includes(i.id))
+
+    // No amount yet → treat it as a manual payment covering the whole month
+    if (paymentTotal <= 0) {
+      if (selectedPaymentIds.length > 0) return
+      const sum = r2(toAdd.reduce((s, i) => s + i.remaining, 0))
+      setPaymentInput(sum.toString())
+      setEditingAmount(false)
+      setSelectedIds(prev => [...prev, ...toAdd.map(i => i.id)])
+      return
+    }
+
+    // Otherwise add charges in order until the payment runs out
+    setEditingAmount(false)
+    let rem = leftover
+    const added = []
+    for (const i of toAdd) {
+      if (rem <= 0.005) break
+      added.push(i.id)
+      rem = r2(rem - i.remaining)
+    }
+    setSelectedIds(prev => [...prev, ...added])
+  }
+
   async function apply() {
     const toApply = allocations.filter(a => a.allocated > 0).map(a => ({ id: a.id, amount: a.allocated }))
     if (!toApply.length) return
@@ -402,11 +433,15 @@ function PaymentDrawer({ account, onClose, onReset }) {
           <div className="px-4 pt-3 pb-4 flex flex-col gap-5">
 
             {/* ── Payments received ── */}
-            {allPayments.length > 0 && (
-              <div>
+            <div>
                 <p className="text-[10px] font-semibold text-[var(--color-muted)] uppercase tracking-widest mb-2">
                   Payments received
                 </p>
+                {allPayments.length === 0 && (
+                  <p className="text-xs text-[var(--color-muted)] px-3 py-3 rounded-xl border border-dashed border-[var(--color-border)]">
+                    No payments found for this account. Enter the amount you paid manually below.
+                  </p>
+                )}
                 <div className="flex flex-col gap-1.5">
                   {allPayments.map(p => {
                     const isActive = selectedPaymentIds.includes(p.id)
@@ -426,7 +461,7 @@ function PaymentDrawer({ account, onClose, onReset }) {
                         <div className="min-w-0 flex-1 text-left">
                           <p className="text-sm font-medium text-[var(--color-text)] truncate">{p.description}</p>
                           <p className="text-[10px] text-[var(--color-muted)]">
-                            {shortDate(p.date)}
+                            {dateWithYear(p.date)}
                             <button
                               onClick={e => { e.stopPropagation(); dismissPayment(p) }}
                               disabled={isDismissing}
@@ -481,7 +516,6 @@ function PaymentDrawer({ account, onClose, onReset }) {
                     : 'Type a different amount'}
                 </button>
               </div>
-            )}
 
             {/* ── Charges to deduct ── */}
             {unpaidItems.length === 0 && !archivedItem ? (
@@ -494,11 +528,39 @@ function PaymentDrawer({ account, onClose, onReset }) {
                     : 'Select a payment above or enter an amount'}
                 </p>
                 <div className="flex flex-col gap-1.5">
-                  {groupByMonth(unpaidItems).map(([mk, items]) => (
+                  {groupByMonth(unpaidItems).map(([mk, items]) => {
+                    const onCount = items.filter(i => selectedIds.includes(i.id)).length
+                    const allOn   = onCount === items.length
+                    const someOn  = onCount > 0 && !allOn
+                    const monthTotal = r2(items.reduce((s, i) => s + i.remaining, 0))
+                    const disabled = !allOn && (selectedPaymentIds.length > 0 || paymentTotal > 0) && leftover <= 0
+                    return (
                     <div key={mk}>
-                      <p className="text-[10px] font-semibold text-[var(--color-muted)] uppercase tracking-widest mb-1.5 mt-1">
-                        {monthLabel(mk)}
-                      </p>
+                      <button
+                        onClick={() => toggleMonth(items)}
+                        disabled={disabled}
+                        className="w-full flex items-center gap-2 mb-1.5 mt-1 px-1 text-left disabled:opacity-40"
+                        aria-label={`${allOn ? 'Unselect' : 'Select'} all charges in ${monthLabel(mk)}`}
+                      >
+                        <span className={`w-4 h-4 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all ${
+                          allOn    ? 'border-[var(--color-income)] bg-[var(--color-income)]'
+                          : someOn ? 'border-[var(--color-today)] bg-[var(--color-today)]'
+                          :          'border-[var(--color-muted)]'
+                        }`}>
+                          {allOn && (
+                            <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="20 6 9 17 4 12"/>
+                            </svg>
+                          )}
+                          {someOn && <span className="w-1.5 h-0.5 bg-white rounded" />}
+                        </span>
+                        <span className="text-[10px] font-semibold text-[var(--color-muted)] uppercase tracking-widest flex-1">
+                          {monthLabel(mk)}
+                        </span>
+                        <span className="text-[10px] font-mono text-[var(--color-muted)]">
+                          {items.length} · {fmt(monthTotal)}
+                        </span>
+                      </button>
                       <div className="flex flex-col gap-1.5">
                         {items.map(item => (
                           <ChargeRow
@@ -510,7 +572,7 @@ function PaymentDrawer({ account, onClose, onReset }) {
                             onToggle={toggleItem}
                             subtitle={
                               <>
-                                {shortDate(item.date)}
+                                {dateWithYear(item.date)}
                                 {item.category && <span className="ml-1">· {item.category}</span>}
                                 {item.paid_amount > 0 && (
                                   <span className="ml-1 text-[var(--color-today)]">· {fmt(item.paid_amount)} already paid</span>
@@ -521,7 +583,8 @@ function PaymentDrawer({ account, onClose, onReset }) {
                         ))}
                       </div>
                     </div>
-                  ))}
+                    )
+                  })}
                   {archivedItem ? (
                     <ArchivedBalanceRow
                       item={archivedItem}
@@ -1138,6 +1201,7 @@ function DebtCard({ account, onResetAccount, onAccountSaved }) {
   const unpaidItems    = account.monthItems.filter(i => !i.is_paid)
   const paidItems      = account.monthItems.filter(i => i.is_paid)
   const totalRemaining = r2(unpaidItems.reduce((s, i) => s + i.remaining, 0))
+  const hasOutstanding = (account.items || []).some(i => !i.is_paid) || !!account.archived_item
 
   async function handleDeleteItem(id) {
     setDeletingId(id)
@@ -1211,7 +1275,7 @@ function DebtCard({ account, onResetAccount, onAccountSaved }) {
                   <div className="min-w-0 flex-1">
                     <p className="text-sm text-[var(--color-text)] truncate">{item.description}</p>
                     <p className="text-[10px] text-[var(--color-muted)]">
-                      {shortDate(item.date)}
+                      {dateWithYear(item.date)}
                       {item.category && <span className="ml-1">· {item.category}</span>}
                     </p>
                   </div>
@@ -1246,17 +1310,20 @@ function DebtCard({ account, onResetAccount, onAccountSaved }) {
                 </div>
               ))}
             </div>
-
-            {/* Make payment */}
-            <div className="px-4 pb-4 pt-3">
-              <button
-                onClick={() => setShowDrawer(true)}
-                className="w-full py-3 rounded-xl bg-[var(--color-today)] text-black text-sm font-bold hover:opacity-90 transition-opacity"
-              >
-                Make a Payment
-              </button>
-            </div>
           </>
+        )}
+
+        {/* Make payment — available whenever anything is outstanding on the account,
+            even if this month has no charges or no payment was imported */}
+        {(hasOutstanding || unpaidItems.length > 0) && (
+          <div className="px-4 pb-4 pt-3">
+            <button
+              onClick={() => setShowDrawer(true)}
+              className="w-full py-3 rounded-xl bg-[var(--color-today)] text-black text-sm font-bold hover:opacity-90 transition-opacity"
+            >
+              Make a Payment
+            </button>
+          </div>
         )}
 
         {/* Paid items */}
@@ -1285,7 +1352,7 @@ function DebtCard({ account, onResetAccount, onAccountSaved }) {
                     <div key={item.id} className="flex items-center justify-between py-2.5 gap-2">
                       <div className="min-w-0 flex-1 opacity-50">
                         <p className="text-sm text-[var(--color-text)] line-through truncate">{item.description}</p>
-                        <p className="text-[10px] text-[var(--color-muted)]">{shortDate(item.date)}</p>
+                        <p className="text-[10px] text-[var(--color-muted)]">{dateWithYear(item.date)}</p>
                       </div>
                       {confirmDeleteId === item.id ? (
                         <div className="flex items-center gap-2 flex-shrink-0">
