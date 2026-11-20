@@ -47,3 +47,14 @@ export async function resetDebtPayments(accountId = null) {
   })
   return readJson(res, 'Reset failed')
 }
+
+// Record a payment straight against an account's balance (no charge to apply it to),
+// e.g. a personal loan that never has imported transactions.
+export async function recordDebtPayment(accountId, { amount, date, description }) {
+  const res = await fetch(`${BASE}/api/debt/accounts/${accountId}/payments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ amount, date, description }),
+  })
+  return readJson(res, 'Payment failed')
+}

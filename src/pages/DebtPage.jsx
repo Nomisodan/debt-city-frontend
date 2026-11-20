@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { fetchDebt, applyDebtPayment, dismissDebtPayment, resetDebtPayments, updateDebtLink, deleteDebtLink, undismissDebtPayment } from '../api/debt'
+import { fetchDebt, applyDebtPayment, dismissDebtPayment, resetDebtPayments, updateDebtLink, deleteDebtLink, undismissDebtPayment, recordDebtPayment } from '../api/debt'
 import { updateAccount } from '../api/accounts'
 import { deleteTransaction, patchTransaction } from '../api/transactions'
 
@@ -1190,6 +1190,167 @@ function EditIcon() {
   )
 }
 
+// ─── Direct payment (accounts with no charges, e.g. a personal loan) ─────────
+
+function todayISO() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function DirectPaymentDrawer({ account, onClose, onSaved }) {
+  const [amount, setAmount] = useState('')
+  const [date, setDate]     = useState(todayISO())
+  const [note, setNote]     = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError]   = useState(null)
+
+  const owed  = account.current_owed ?? 0
+  const value = parseFloat(amount) || 0
+  const after = r2(owed - value)
+
+  async function save() {
+    if (value <= 0) { setError('Enter an amount greater than 0'); return }
+    setSaving(true)
+    setError(null)
+    try {
+      await recordDebtPayment(account.id, { amount: value, date, description: note.trim() || 'Payment' })
+      onSaved()
+      onClose()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col justify-end">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative bg-[var(--color-surface)] rounded-t-2xl shadow-2xl">
+        <div className="flex justify-center pt-3 pb-1">
+          <div className="w-10 h-1 rounded-full bg-[var(--color-border)]" />
+        </div>
+        <div className="px-4 pt-1 pb-3 flex items-start justify-between">
+          <div>
+            <p className="text-base font-bold text-[var(--color-text)]">Make a Payment</p>
+            <p className="text-xs text-[var(--color-muted)]">{account.name} · {fmt(owed)} owed</p>
+          </div>
+          <button onClick={onClose} aria-label="Close"
+            className="w-8 h-8 flex items-center justify-center text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors rounded-lg">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+
+        <div className="px-4 pb-4 flex flex-col gap-3">
+          <div>
+            <label className="text-[10px] font-semibold text-[var(--color-muted)] uppercase tracking-widest mb-1 block">Amount paid</label>
+            <div className="relative">
+              <span className="absolute left-0 top-1/2 -translate-y-1/2 text-3xl font-mono font-bold text-[var(--color-muted)] pointer-events-none">$</span>
+              <input
+                type="number" inputMode="decimal" step="0.01" min="0" autoFocus
+                value={amount}
+                onChange={e => setAmount(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') save() }}
+                placeholder="0.00"
+                className="pl-7 bg-transparent border-none outline-none text-3xl font-mono font-bold text-[var(--color-text)] w-full placeholder:text-[var(--color-border)]"
+              />
+            </div>
+            {value > 0 && (
+              <p className="text-xs text-[var(--color-muted)] mt-1">
+                Balance after: <span className={`font-mono font-semibold ${after <= 0 ? 'text-[var(--color-income)]' : 'text-[var(--color-expense)]'}`}>{fmt(Math.max(after, 0))}</span>
+                {after < 0 && <span className="ml-1 text-[var(--color-today)]">· {fmt(after)} more than owed</span>}
+              </p>
+            )}
+          </div>
+
+          <div className="flex gap-2">
+            <div className="w-40 flex-shrink-0">
+              <label className="text-[10px] text-[var(--color-muted)] mb-1 block">Date</label>
+              <input type="date" value={date} onChange={e => setDate(e.target.value)}
+                className="w-full bg-[var(--color-bg)] border border-[var(--color-border)] rounded-lg px-2 py-2 text-sm text-[var(--color-text)]" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <label className="text-[10px] text-[var(--color-muted)] mb-1 block">Note (optional)</label>
+              <input type="text" value={note} onChange={e => setNote(e.target.value)} placeholder="e.g. E-transfer to Dad"
+                className="w-full bg-[var(--color-bg)] border border-[var(--color-border)] rounded-lg px-3 py-2 text-sm text-[var(--color-text)] placeholder:text-[var(--color-muted)]" />
+            </div>
+          </div>
+        </div>
+
+        <div className="px-4 pt-3 pb-5 border-t border-[var(--color-border)]">
+          {error && <p className="text-xs text-[var(--color-expense)] mb-2">{error}</p>}
+          <button onClick={save} disabled={saving || value <= 0}
+            className="w-full py-3 rounded-xl bg-[var(--color-today)] text-black text-sm font-bold disabled:opacity-40 transition-opacity">
+            {saving ? 'Saving…' : value > 0 ? `Record ${fmt(value)} payment` : 'Record payment'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function DirectPaymentsList({ account, onChanged }) {
+  const [confirmId, setConfirmId] = useState(null)
+  const [busyId, setBusyId]       = useState(null)
+  const payments = account.manual_payments || []
+  const total = r2(payments.reduce((s, p) => s + p.amount, 0))
+
+  async function remove(id) {
+    setBusyId(id)
+    try {
+      await deleteTransaction(id)
+      setConfirmId(null)
+      onChanged()
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  if (payments.length === 0) {
+    return <p className="px-4 py-4 text-sm text-[var(--color-muted)]">No payments recorded yet.</p>
+  }
+
+  return (
+    <div className="px-4 pt-3">
+      <p className="text-[10px] font-semibold text-[var(--color-muted)] uppercase tracking-widest mb-1">
+        Payments made · {fmt(total)}
+      </p>
+      <div className="divide-y divide-[var(--color-border)]">
+        {payments.map(p => (
+          <div key={p.id} className="flex items-center justify-between py-2.5 gap-2">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm text-[var(--color-text)] truncate">{p.description}</p>
+              <p className="text-[10px] text-[var(--color-muted)]">{dateWithYear(p.date)}</p>
+            </div>
+            {confirmId === p.id ? (
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <span className="text-[11px] text-[var(--color-expense)]">Delete?</span>
+                <button onClick={() => remove(p.id)} disabled={busyId === p.id}
+                  className="text-xs font-semibold text-[var(--color-expense)] disabled:opacity-50">
+                  {busyId === p.id ? '…' : 'Yes'}
+                </button>
+                <button onClick={() => setConfirmId(null)} className="text-xs text-[var(--color-muted)]">Cancel</button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                <span className="text-sm font-mono font-semibold text-[var(--color-income)]">{fmt(p.amount)}</span>
+                <button onClick={() => setConfirmId(p.id)} aria-label="Delete payment"
+                  className="p-1 text-[var(--color-muted)] hover:text-[var(--color-expense)] transition-colors">
+                  <TrashIcon />
+                </button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function DebtCard({ account, onResetAccount, onAccountSaved }) {
   const [showDrawer, setShowDrawer]     = useState(false)
   const [showPaid, setShowPaid]         = useState(false)
@@ -1202,6 +1363,10 @@ function DebtCard({ account, onResetAccount, onAccountSaved }) {
   const paidItems      = account.monthItems.filter(i => i.is_paid)
   const totalRemaining = r2(unpaidItems.reduce((s, i) => s + i.remaining, 0))
   const hasOutstanding = (account.items || []).some(i => !i.is_paid) || !!account.archived_item
+  // No charges at all (e.g. a personal loan): payments go straight against the balance owed
+  const isDirect       = (account.items || []).length === 0 && !account.archived_item
+  const owedNow        = account.current_owed ?? 0
+  const headerAmount   = isDirect ? Math.max(owedNow, 0) : totalRemaining
 
   async function handleDeleteItem(id) {
     setDeletingId(id)
@@ -1240,11 +1405,11 @@ function DebtCard({ account, onResetAccount, onAccountSaved }) {
             <p className="text-xs text-[var(--color-muted)]">{BANK_LABEL[account.bank] ?? account.bank}</p>
           </div>
           <div className="text-right">
-            <p className={`text-lg font-bold font-mono ${totalRemaining > 0 ? 'text-[var(--color-expense)]' : 'text-[var(--color-income)]'}`}>
-              {fmt(totalRemaining)}
+            <p className={`text-lg font-bold font-mono ${headerAmount > 0 ? 'text-[var(--color-expense)]' : 'text-[var(--color-income)]'}`}>
+              {fmt(headerAmount)}
             </p>
             <p className="text-[10px] text-[var(--color-muted)]">
-              {totalRemaining > 0 ? 'outstanding' : 'all paid'}
+              {isDirect ? (headerAmount > 0 ? 'owed' : 'paid off') : totalRemaining > 0 ? 'outstanding' : 'all paid'}
             </p>
           </div>
         </div>
@@ -1252,7 +1417,9 @@ function DebtCard({ account, onResetAccount, onAccountSaved }) {
         <BeforeBalanceRow account={account} onSaved={updated => onAccountSaved(updated)} />
         <ArchiveRow account={account} onSaved={() => onResetAccount()} />
 
-        {account.monthItems.length === 0 ? (
+        {isDirect ? (
+          <DirectPaymentsList account={account} onChanged={onResetAccount} />
+        ) : account.monthItems.length === 0 ? (
           <div className="px-4 py-5 flex items-center gap-2 text-[var(--color-muted)]">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
@@ -1315,7 +1482,7 @@ function DebtCard({ account, onResetAccount, onAccountSaved }) {
 
         {/* Make payment — available whenever anything is outstanding on the account,
             even if this month has no charges or no payment was imported */}
-        {(hasOutstanding || unpaidItems.length > 0) && (
+        {(isDirect || hasOutstanding || unpaidItems.length > 0) && (
           <div className="px-4 pb-4 pt-3">
             <button
               onClick={() => setShowDrawer(true)}
@@ -1405,7 +1572,14 @@ function DebtCard({ account, onResetAccount, onAccountSaved }) {
         <LinkedTransactionsSection account={account} onChanged={onResetAccount} />
       </div>
 
-      {showDrawer && (
+      {showDrawer && isDirect && (
+        <DirectPaymentDrawer
+          account={account}
+          onClose={() => setShowDrawer(false)}
+          onSaved={onResetAccount}
+        />
+      )}
+      {showDrawer && !isDirect && (
         <PaymentDrawer
           account={account}
           onClose={() => setShowDrawer(false)}
@@ -1488,6 +1662,8 @@ export default function DebtPage() {
         ? { ...acct, balance: updatedAccount.balance, balance_date: updatedAccount.balance_date, credit_limit: updatedAccount.credit_limit }
         : acct
     ))
+    // balance changes also move server-computed totals (e.g. current_owed), so refresh them
+    handleResetAccount()
   }
 
   // Total payments received across all debts that haven't been allocated to any charge yet
